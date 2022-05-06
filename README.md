@@ -1,6 +1,6 @@
-# This is a plugin for Automate-Everything providing support for 1-Wire devices (DS2408, DS18B20, DS2480B, DS2402)
+# Welcome
 
-This is a plugin for [Automate-Everything](https://github.com/tomaszbabiuk/automate-everything)
+This is a plugin for [Automate-Everything](https://github.com/tomaszbabiuk/automate-everything). It provides a support for 1-Wire devices (DS2408, DS18B20, DS2480B, DS2402)
 
 # Directory setup
 ```bash
