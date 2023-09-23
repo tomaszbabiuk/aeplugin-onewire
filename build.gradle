@@ -23,7 +23,7 @@ repositories {
 }
 
 compileKotlin {
-    kotlinOptions.jvmTarget = '11'
+    kotlinOptions.jvmTarget = "$jdkVersion"
 }
 
 jar {
