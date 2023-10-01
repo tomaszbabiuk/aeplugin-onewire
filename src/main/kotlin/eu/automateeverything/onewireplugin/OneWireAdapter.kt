@@ -27,19 +27,18 @@ import eu.automateeverything.domain.events.PortUpdateType
 import eu.automateeverything.domain.hardware.*
 import eu.automateeverything.onewireplugin.helpers.SwitchContainerHelper
 import eu.automateeverything.onewireplugin.helpers.TemperatureContainerHelper
-import kotlinx.coroutines.*
-import org.slf4j.LoggerFactory
 import java.math.BigDecimal
 import java.util.*
 import java.util.concurrent.ConcurrentLinkedQueue
+import kotlinx.coroutines.*
+import org.slf4j.LoggerFactory
 
 class OneWireAdapter(
     owningPluginId: String,
     private val serialPortName: String,
     eventBus: EventBus,
     private val ds2408AsRelays: List<String>
-)
-    : HardwareAdapterBase<OneWirePort<*>>(owningPluginId, "1-WIRE $serialPortName", eventBus) {
+) : HardwareAdapterBase<OneWirePort<*>>(owningPluginId, "1-WIRE $serialPortName", eventBus) {
 
     private val logger = LoggerFactory.getLogger(OneWireAdapter::class.java)
     private var mapper: OneWireSensorToPortMapper
@@ -48,32 +47,40 @@ class OneWireAdapter(
 
     init {
         val portIdBuilder = PortIdBuilder(owningPluginId)
-        mapper = OneWireSensorToPortMapper(owningPluginId, portIdBuilder, eventBus, ds2408AsRelays)
+        mapper =
+            OneWireSensorToPortMapper(
+                owningPluginId,
+                adapterId,
+                portIdBuilder,
+                eventBus,
+                ds2408AsRelays
+            )
     }
 
-    var operationScope: CoroutineScope? = null
-
+    private var operationScope: CoroutineScope? = null
 
     override fun executePendingChanges() {
-        val portsGroupedByAddress = ports
-            .values
-            .filterIsInstance<OneWireRelayPort>()
-            .groupBy { it.address }
+        val portsGroupedByAddress =
+            ports.values.filterIsInstance<OneWireRelayPort>().groupBy { it.address }
 
         portsGroupedByAddress.forEach { (address, u) ->
             val channels = u.size
             val sortedPorts = u.sortedBy { it.channel }
 
-            val prevValues = Array(channels) { i ->
-                val bigDecimal = sortedPorts[i].value.value
-                bigDecimal == BigDecimal.ONE
-            }
-            val newValues = Array(channels) { i ->
-                val bigDecimal = sortedPorts[i].requestedValue?.value ?: sortedPorts[i].value.value
-                bigDecimal == BigDecimal.ONE
-            }
+            val prevValues =
+                Array(channels) { i ->
+                    val bigDecimal = sortedPorts[i].value.value
+                    bigDecimal == BigDecimal.ONE
+                }
+            val newValues =
+                Array(channels) { i ->
+                    val bigDecimal =
+                        sortedPorts[i].requestedValue?.value ?: sortedPorts[i].value.value
+                    bigDecimal == BigDecimal.ONE
+                }
 
-            val changedItems = newValues.filterIndexed { index, newValue -> prevValues[index] != newValue }
+            val changedItems =
+                newValues.filterIndexed { index, newValue -> prevValues[index] != newValue }
             if (changedItems.isNotEmpty()) {
                 val valueSnapshot = ValueSnapshot(address, prevValues, newValues)
                 executionQueue.add(valueSnapshot)
@@ -103,14 +110,11 @@ class OneWireAdapter(
             operationScope!!.cancel("Adapter already started")
         }
 
-        //discovery
+        // discovery
         val now = Calendar.getInstance()
         val adapterForDiscoveryOnly = initializeAdapter(serialPortName)
         val allContainers = searchForOneWireSensors(adapterForDiscoveryOnly)
-        allContainers
-            .mapNotNull { mapper.map(it, now)}
-            .flatten()
-            .forEach { ports[it.id] = it }
+        allContainers.mapNotNull { mapper.map(it, now) }.flatten().forEach { ports[it.portId] = it }
         freeAdapter(adapterForDiscoveryOnly)
 
         operationScope = CoroutineScope(Dispatchers.IO)
@@ -124,10 +128,7 @@ class OneWireAdapter(
     }
 
     private fun searchForOneWireSensors(adapter: USerialAdapter): List<OneWireContainer> {
-        return adapter
-            .allDeviceContainers
-            .toList()
-            .filterIsInstance<OneWireContainer>()
+        return adapter.allDeviceContainers.toList().filterIsInstance<OneWireContainer>()
     }
 
     override fun stop() {
@@ -135,7 +136,9 @@ class OneWireAdapter(
     }
 
     override suspend fun internalDiscovery(mode: DiscoveryMode) {
-        logDiscovery("Discovery of 1-wire adapters is disabled. Devices are discovered only once (on initial startup)")
+        logDiscovery(
+            "Discovery of 1-wire adapters is disabled. Devices are discovered only once (on initial startup)"
+        )
         addPotentialNewPorts(ports.values.toList())
     }
 
@@ -157,8 +160,7 @@ class OneWireAdapter(
             }
 
             freeAdapter(adapter)
-        }
-        catch (ex: OneWireIOException) {
+        } catch (ex: OneWireIOException) {
             logger.error("Unhandled exception from OneWire", ex)
 
             try {
@@ -168,11 +170,9 @@ class OneWireAdapter(
             }
 
             if (ex.message == "OneWireContainer28-temperature conversion not complete") {
-               logger.info(ex.message)
+                logger.info(ex.message)
             } else {
-                ports.values.forEach {
-                    broadcastPortUpdate(PortUpdateType.LastSeenChange, it)
-                }
+                ports.values.forEach { broadcastPortUpdate(PortUpdateType.LastSeenChange, it) }
             }
         }
     }
@@ -181,13 +181,10 @@ class OneWireAdapter(
         if (!executionQueue.isEmpty()) {
             val snapshot = executionQueue.poll()
             val container = adapter.getDeviceContainer(snapshot.containerAddress) as SwitchContainer
-            val newValuesInverted = Array(snapshot.newValues.size) {
-                !snapshot.newValues[it]
-            }
+            val newValuesInverted = Array(snapshot.newValues.size) { !snapshot.newValues[it] }
             SwitchContainerHelper.execute(container, newValuesInverted)
 
-            ports
-                .values
+            ports.values
                 .filter { port -> port.address.contentEquals(snapshot.containerAddress) }
                 .filterIsInstance<OneWireRelayPort>()
                 .forEach { port ->
@@ -206,13 +203,15 @@ class OneWireAdapter(
             ports.values
                 .filter { port -> port.address.contentEquals(container.address) }
                 .map { port ->
-                    port.lastSeenTimestamp = now.timeInMillis
+                    port.updateLastSeenTimeStamp(now.timeInMillis)
                     port
                 }
                 .filterIsInstance<OneWireTemperatureInputPort>()
                 .filter { port -> port.lastUpdateMs + 30000 < now.timeInMillis }
                 .forEach { port ->
-                    val newTemperatureK = TemperatureContainerHelper.read(container).toBigDecimal() + 273.15.toBigDecimal()
+                    val newTemperatureK =
+                        TemperatureContainerHelper.read(container).toBigDecimal() +
+                            273.15.toBigDecimal()
                     if (newTemperatureK != port.value.value) {
                         port.update(now.timeInMillis, Temperature(newTemperatureK))
                         broadcastPortUpdate(PortUpdateType.ValueChange, port)
@@ -227,23 +226,22 @@ class OneWireAdapter(
             if (isRelay) {
                 ports.values
                     .filter { port -> port.address.contentEquals(container.address) }
-                    .forEach { port ->
-                        port.lastSeenTimestamp = now.timeInMillis
-                    }
+                    .forEach { port -> port.updateLastSeenTimeStamp(now.timeInMillis) }
             } else {
                 val readings = SwitchContainerHelper.read(container, true)
 
                 ports.values
                     .filter { port -> port.address.contentEquals(container.address) }
                     .map { port ->
-                        port.lastSeenTimestamp = now.timeInMillis
+                        port.updateLastSeenTimeStamp(now.timeInMillis)
                         port
                     }
                     .filterIsInstance<OneWireBinaryInputPort>()
                     .forEach { port ->
                         val channel = port.channel
                         val reading = readings[channel]
-                        val newBinaryReading = if (reading.isSensed) !port.value.value else reading.level
+                        val newBinaryReading =
+                            if (reading.isSensed) !port.value.value else reading.level
                         if (newBinaryReading != port.value.value) {
                             port.update(now.timeInMillis, BinaryInput(newBinaryReading))
                             broadcastPortUpdate(PortUpdateType.ValueChange, port)
@@ -256,7 +254,8 @@ class OneWireAdapter(
     data class ValueSnapshot(
         val containerAddress: ByteArray,
         val previousValues: Array<Boolean>,
-        val newValues: Array<Boolean>) {
+        val newValues: Array<Boolean>
+    ) {
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
